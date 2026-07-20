@@ -1,0 +1,51 @@
+{
+  "id": "greptile",
+  "name": "greptile",
+  "version": "0.2.0+codex.20260718021051",
+  "description": "Review changes locally with the Greptile CLI, address PR feedback, and iterate to a 5/5 Greptile score.",
+  "author": {
+    "name": "Greptile",
+    "email": "support@greptile.com",
+    "url": "https://www.greptile.com"
+  },
+  "homepage": "https://www.greptile.com",
+  "repository": "https://github.com/greptileai/skills",
+  "license": "MIT",
+  "keywords": [
+    "ai-code-review",
+    "pull-requests",
+    "codebase-context",
+    "mcp",
+    "custom-rules",
+    "developer-tools"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Greptile",
+    "shortDescription": "Review changes and resolve PR feedback.",
+    "longDescription": "Use Greptile to review changes locally with the CLI before opening a PR, address unresolved feedback and failing checks, or run Greploop — a local fix-review loop that iterates until the change reaches a 5/5 review, then syncs the result to your PR.",
+    "developerName": "Greptile",
+    "category": "Productivity",
+    "capabilities": [
+      "Local CLI change reviews",
+      "Greploop fix-review loops",
+      "PR feedback resolution",
+      "Status check analysis"
+    ],
+    "websiteURL": "https://www.greptile.com/docs",
+    "privacyPolicyURL": "https://www.greptile.com/security/privacy",
+    "termsOfServiceURL": "https://www.greptile.com/terms-of-service",
+    "brandColor": "#28E99F",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/icon.png",
+    "logoDark": "./assets/icon.png",
+    "screenshots": [
+      "./assets/greptile-og.png"
+    ],
+    "defaultPrompt": [
+      "Review my changes before opening a PR.",
+      "Address unresolved feedback on my PR.",
+      "Run Greploop until this PR reaches 5/5."
+    ]
+  }
+}

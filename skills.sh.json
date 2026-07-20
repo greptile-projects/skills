@@ -1,0 +1,16 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "notGrouped": "bottom",
+  "groupings": [
+    {
+      "title": "Greptile",
+      "description": "Greptile is an AI code reviewer that uses full codebase context to review changes, address feedback, and improve pull requests.",
+      "skills": [
+        "review-changes",
+        "address-pr-feedback",
+        "greploop",
+        "preflight"
+      ]
+    }
+  ]
+}

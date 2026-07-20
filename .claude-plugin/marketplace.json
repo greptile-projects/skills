@@ -1,0 +1,36 @@
+{
+  "name": "greptile",
+  "owner": {
+    "name": "Greptile",
+    "email": "support@greptile.com"
+  },
+  "description": "Official Greptile plugins and agent skills for code review workflows.",
+  "plugins": [
+    {
+      "name": "greptile",
+      "source": "./plugins/greptile",
+      "version": "0.2.0",
+      "description": "Review changes locally with the Greptile CLI, address PR feedback, and iterate to a 5/5 Greptile score.",
+      "author": {
+        "name": "Greptile",
+        "email": "support@greptile.com"
+      },
+      "homepage": "https://www.greptile.com/docs",
+      "repository": "https://github.com/greptileai/skills",
+      "license": "MIT",
+      "keywords": [
+        "greptile",
+        "code-review",
+        "pull-requests",
+        "developer-tools"
+      ],
+      "category": "development",
+      "tags": [
+        "ai-code-review",
+        "github",
+        "gitlab",
+        "perforce"
+      ]
+    }
+  ]
+}
