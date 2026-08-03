@@ -162,7 +162,9 @@ STATUS_PATH="$gdir/last-review.status.tmp"
 cleanup() {
   rm -f "$STATUS_PATH"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+# Exit non-zero so git aborts the push; the EXIT trap handles cleanup.
+trap 'exit 130' INT TERM
 
 save_status() {
   mv "$STATUS_PATH" "$JSON_PATH"
@@ -257,7 +259,7 @@ resume=0
 if [ "${GREPTILE_AUTO_REVIEW:-}" != "1" ] && [ "$INTERACTIVE" = 1 ] && [ -e /dev/tty ]; then
   printf '%b' "${DIM}[greptile]${RESET} Review before push? ${DIM}(Y/n)${RESET} " >&2
   answer=''
-  read -r answer </dev/tty || answer=''
+  read -r answer </dev/tty 2>/dev/null || answer=''
   case "$answer" in
     [Nn]*) notice "skipped: declined."; exit 0 ;;
   esac
