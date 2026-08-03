@@ -1,322 +1,213 @@
 ---
 name: greploop
-description: Fix changes until Greptile gives them a 5/5 review.
+description: >
+  Runs the Greptile CLI on the current local branch, fixes what the review finds, and reviews
+  again, until the review comes back 5/5 with zero comments. Use when the user says
+  "greploop", asks to iterate on Greptile feedback until the review is clean, wants a branch
+  polished before pushing or opening a PR, or wants local review findings fixed and re-reviewed
+  automatically.
+license: MIT
+metadata:
+  author: greptileai
+allowed-tools:
+  - 'Bash(greptile *)'
+  - 'Bash(git *)'
 ---
 
 # Greploop
 
-Iteratively fix a change until Greptile gives a perfect review: 5/5 confidence, zero unresolved comments.
+Run a Greptile review on the local branch, fix what it finds, review again. Stop at 5/5 with zero
+comments.
 
-Reviews run locally through the Greptile CLI — the same engine as hosted PR reviews — so iteration is fast and produces no PR noise. If a PR/MR exists, it is updated **once** at the end: one push, one hosted review, threads resolved.
+This is the local CLI loop. No PR, nothing pushed. Command and output details are in the
+`greptile-cli` skill.
 
-## Inputs
+## You are the loop
 
-- **PR/MR/CL number** (optional): If not provided, detect the PR/MR for the current branch, or the default pending changelist for p4.
+Run the steps below yourself, once per iteration. Do not reach for `watch(1)`:
 
-## Instructions
+- It never exits, so it hangs the session. BusyBox `watch` has no exit condition, and GNU's
+  `--chgexit` only stops when output changes, not when the score reaches 5/5.
+- Nothing edits the code between ticks, so it re-reviews the same commit and returns the same
+  findings forever, billing a real review each time without ever converging.
+- It is not installed on macOS.
 
-### 0. Detect platform
+The fix between reviews is the entire point, and only you can make it.
 
-First check for Perforce, then fall back to git remote detection:
-
-```bash
-# Check for Perforce environment
-if p4 info >/dev/null 2>&1; then
-  VCS="perforce"
-else
-  REMOTE_URL=$(git remote get-url origin)
-  if echo "$REMOTE_URL" | grep -qi "gitlab"; then
-    VCS="gitlab"
-  else
-    VCS="github"
-  fi
-fi
-```
-
-For self-hosted GitLab instances whose hostname doesn't contain "gitlab", the user can override by passing `--vcs gitlab` as an input. For Perforce, pass `--vcs perforce`.
-
-**Perforce:** the Greptile CLI does not support Perforce. Follow [references/perforce.md](references/perforce.md) — the hosted shelve-review loop — instead of the steps below. None of the remaining steps in this file apply.
-
-### 1. Check prerequisites
-
-**The CLI must be installed and authenticated:**
+If the user explicitly wants a hands-off shell loop with no agent in it, this is the shape. It still
+cannot fix anything, so it only reports:
 
 ```bash
-command -v greptile
-greptile whoami
-```
-
-If the CLI is missing, do not install it automatically. Ask the user for permission, then show the recommended install command:
-
-```bash
-npm i -g greptile
-```
-
-If npm is unavailable, offer the shell installer fallback:
-
-```bash
-curl -fsSL "https://greptile.com/cli/install" | sh
-```
-
-If authentication is missing, run `greptile login` and wait for the user to finish.
-
-**The current branch must not be the default branch.** The CLI reviews the current branch against its base, so it cannot review from `main`/`master`/the repository default:
-
-```bash
-CURRENT_BRANCH=$(git branch --show-current)
-DEFAULT_BRANCH=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
-```
-
-If the current branch is the default branch, stop and tell the user to switch to (or create) a feature branch containing their changes.
-
-### 2. Identify the PR/MR and announce the mode
-
-**GitHub:**
-```bash
-gh pr view --json number,headRefName -q '{number: .number, branch: .headRefName}'
-```
-
-**GitLab:**
-```bash
-glab mr view --output json | jq '{iid: .iid, branch: .source_branch}'
-```
-
-- **PR/MR exists** → run the full flow. Tell the user up front: iteration happens locally, and the PR/MR will be updated once at the end (one push, threads resolved).
-- **No PR/MR** → run the local loop (step 3) only, then report. Do not commit, push, or open a PR/MR unless the user separately asks. Only a lookup that *confirms* no PR/MR exists counts — do not treat a missing tool, authentication failure, or network error as confirmation.
-
-### 3. Local review loop
-
-Repeat until clean. **Max 5 iterations** to avoid runaway loops.
-
-Do not fetch or act on prior Greptile comments from the PR/MR — they may be outdated or already dismissed, and there is no reliable way to tell. Start with a fresh review; the loop is simply review → fix → review.
-
-```bash
-greptile review --json
-```
-
-If the review is unfinished, continue with `greptile review --resume --json`; if JSON mode is unsupported, use `greptile review --agent`.
-
-Each iteration:
-
-1. Run the review.
-2. If it reports **5/5 with no remaining findings** (or, if the CLI output includes no confidence score, **zero remaining findings**), exit the loop.
-3. Apply actionable findings; note informational ones and false positives.
-4. Run relevant validation (tests, typecheck, lint — whatever the repo uses).
-5. Repeat.
-
-If there is no PR/MR, stop here and go to step 5. Do not commit or push.
-
-### 4. Deliver to the PR/MR
-
-One round, not a loop.
-
-**Commit and push once.** Stage only the files modified while addressing findings — do not use `git add -A`, which would sweep in unrelated working-tree changes:
-
-```bash
-git add <files modified in step 3>
-git commit -m "resolve greptile comments"
-git push
-```
-
-**Wait for the hosted review.** Most installations review automatically on push, so do not post a trigger comment immediately.
-
-**GitHub** — poll for the Greptile check run on the new head:
-
-```bash
-HEAD_SHA=$(gh pr view <PR_NUMBER> --json headRefOid -q .headRefOid)
-
-while true; do
-  GREPTILE_CHECK=$(gh api "repos/{owner}/{repo}/commits/$HEAD_SHA/check-runs" \
-    --jq '.check_runs[] | select(.name | test("greptile"; "i"))' 2>/dev/null)
-
-  if [ -z "$GREPTILE_CHECK" ]; then
-    echo "Waiting for Greptile check to appear..."
-    sleep 5
-    continue
-  fi
-
-  STATUS=$(echo "$GREPTILE_CHECK" | jq -r '.status // "completed"')
-
-  if [ "$STATUS" = "completed" ]; then
-    break
-  fi
-
-  echo "Waiting for Greptile... (status: $STATUS)"
-  sleep 10
+for i in $(seq 1 5); do
+  greptile review --json > review.json || break
+  [ "$(jq '.confidence == 5 and (.comments | length) == 0' < review.json)" = "true" ] && break
+  echo "iteration $i: $(jq -r '.confidence')/5, $(jq '.comments | length' < review.json) comments"
 done
 ```
 
-If no Greptile check appears within ~60 seconds, the installation likely doesn't auto-review — post `@greptile review` as a PR comment, then resume polling:
+## Loop
 
-```bash
-gh pr comment <PR_NUMBER> --body "@greptile review"
+Copy this checklist and check items off as you go:
+
+```
+Greploop progress:
+- [ ] Step 0: Preflight
+- [ ] Step 1: Start from a clean worktree
+- [ ] Step 2: Review
+- [ ] Step 3: Check exit conditions
+- [ ] Step 4: Fix findings
+- [ ] Step 5: Commit, then back to Step 2
+- [ ] Step 6: Report
 ```
 
-**GitLab** — poll for the Greptile pipeline job on the new head (see [GitLab API reference](references/gitlab-api.md)); if no pipeline appears within ~60 seconds, post the trigger:
+### Step 0: Preflight
 
 ```bash
-glab mr note <MR_IID> --message "@greptile review"
+git rev-parse --show-toplevel   # must be a git repo with a remote
+command -v greptile             # must be installed
+greptile whoami                 # check the OUTPUT, not the exit code
 ```
 
-**Fetch the hosted review results.** Greptile may surface its score in several places — check **all** of the relevant sources:
+If `greptile` is missing, stop and tell the user to install it (`npm install -g greptile`, or
+`brew install greptileai/tap/greptile`).
 
-**GitHub:**
-
-**1. PR description (body):**
-```bash
-gh pr view <PR_NUMBER> --json body -q '.body'
-```
-
-**2. General PR comments (issue comments):**
-```bash
-gh api --paginate "repos/{owner}/{repo}/issues/<PR_NUMBER>/comments?per_page=100"
-```
-
-Filter for Greptile-authored comments and use the body from the most recently updated comment (`updated_at`), not the most recently created comment. Greptile may edit the same general PR comment on each review cycle; parse the current body, including the "Prompt to fix all with AI" section, before deciding there are no remaining issues.
-
-**3. PR reviews:**
-```bash
-gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/reviews
-```
-
-Look for the most recent entry from `greptile-apps[bot]` or `greptile-apps-staging[bot]`.
-
-**GitLab:**
-
-**1. MR description (body):**
-```bash
-glab mr view <MR_IID> --output json | jq -r '.description'
-```
-
-**2. MR notes (comments):**
-```bash
-glab api "projects/:fullpath/merge_requests/<MR_IID>/notes"
-```
-
-Filter for notes from the Greptile bot user (check the `author.username` field — the exact username may vary per installation; verify on first run).
-
-For both platforms, parse the text for:
-- **Confidence score**: a pattern like `3/5` or `5/5` (or `Confidence: 3/5`).
-- **Comment count**: Number of inline review comments noted in the summary.
-
-Use whichever source has the **most recently updated** score. For GitHub, prefer `updated_at` from issue comments when comparing an edited Greptile summary against older review entries.
-
-Also fetch all unresolved inline comments:
-
-**GitHub:**
-```bash
-gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments
-```
-
-**GitLab:**
-```bash
-glab api "projects/:fullpath/merge_requests/<MR_IID>/discussions"
-```
-
-Filter to `DiffNote` type discussions (`notes[0].type == "DiffNote"`) from Greptile that are on the latest commit and not yet resolved (`"resolved": false`).
-
-Because the CLI and the hosted review use the same engine, the hosted round should confirm 5/5 with no new findings. If new findings do appear, treat them as input and return to step 3 — they count against the same 5-iteration cap.
-
-**Resolve addressed threads.**
-
-**GitHub** — fetch unresolved review threads and resolve all that have been addressed (see [GraphQL reference](references/graphql-queries.md)):
+`greptile whoami` **exits `0` even when signed out**, printing `Not signed in. …` to stdout, so
+gate on its text:
 
 ```bash
-gh api graphql -f query='
-query($cursor: String) {
-  repository(owner: "OWNER", name: "REPO") {
-    pullRequest(number: PR_NUMBER) {
-      reviewThreads(first: 100, after: $cursor) {
-        pageInfo { hasNextPage endCursor }
-        nodes {
-          id
-          isResolved
-          comments(first: 1) {
-            nodes { body path author { login } }
-          }
-        }
-      }
-    }
-  }
-}'
+greptile whoami | grep -q '^Not signed in' && echo "needs login"
 ```
 
-Resolve addressed threads:
+If it needs a login, stop and tell the user to run `greptile login`. It is an interactive browser
+flow; do not attempt it yourself.
+
+### Step 1: Start from a clean worktree
+
+`greptile review` reviews **committed** changes against the branch base, and this loop commits once
+per iteration, so it needs a clean tree to begin with.
 
 ```bash
-gh api graphql -f query='
-mutation {
-  t1: resolveReviewThread(input: {threadId: "ID1"}) { thread { isResolved } }
-  t2: resolveReviewThread(input: {threadId: "ID2"}) { thread { isResolved } }
-}'
+git status --porcelain     # must be empty before you start
 ```
 
-**GitLab** — fetch unresolved discussions and resolve each one (see [GitLab API reference](references/gitlab-api.md)):
+If anything is listed, **stop and hand it back to the user.** Ask them to commit or stash it, and
+say why: once the loop starts, any file it edits gets staged whole, so a change they had in that
+file would be swept into a commit labelled as review feedback. You cannot separate their edits from
+yours inside a single file, and an agent should not be splitting hunks to try.
+
+Do not commit or stash on their behalf, and do not proceed with a dirty tree because the dirty
+files look unrelated. The loop only learns which files it will touch after the first review.
+
+### Step 2: Review
 
 ```bash
-glab api "projects/:fullpath/merge_requests/<MR_IID>/discussions?per_page=100"
+greptile review --json > review.json
 ```
 
-Filter for `"resolved": false` discussions. Then resolve each by its `id`:
+Always `--json`, and capture it. The next steps read `review.json`. A review takes on the order of
+a minute; do not wrap it in a short timeout, and do not start a second one while one is running.
+
+Pass `-b <branch>` when the user named a base. Otherwise omit it and let the CLI resolve the
+repository default.
+
+A zero exit with findings is the normal case. `greptile review` exits `0` whatever it finds. A
+**non-zero** exit means the review did not complete: report the stderr message and stop. Several of
+those are about the input and will never clear by looping: detached HEAD, more than 500 changed
+files, a diff over 3 MB, a base sharing no history with HEAD, or every changed file held back as
+sensitive.
+
+### Step 3: Check exit conditions
 
 ```bash
-glab api --method PUT \
-  "projects/:fullpath/merge_requests/<MR_IID>/discussions/<DISCUSSION_ID>" \
-  --field resolved=true
+jq '{confidence, count: (.comments | length)}' < review.json
 ```
 
-Repeat for each unresolved discussion ID. (GitLab has no batch resolution — loop through each one.)
+**Stop the loop when any of these is true:**
 
-**Post a summary comment.** One comment with the resolved count — this is where the count lives, not in the commit message:
+- `confidence` is `5` and `comments` is empty. Success, go to Step 6.
+- Iteration count reaches 5. Stop and report what remains.
+- Two consecutive iterations produce the same findings with no successful fix. You are stuck.
 
-**GitHub:**
+`confidence: 5` with comments still open means keep going: the comments are the work.
+
+### Step 4: Fix findings
+
+Work findings in this order: `securityIssue: true`, then `P0`, then `P1`, then `P2`. Ignore
+`category` and `verifiedEvidence`. On the `--json` path they are always `"comment"` and `null`, so
+they carry no ranking signal.
+
+For each finding:
+
+1. Read the file at `path` around `startLine` to `endLine`. Do not rely on `hunk.before` alone. The
+   working tree has usually moved since the review ran.
+2. Decide whether it is actionable. It is **not** when it is factually wrong about the code,
+   describes intended behavior, or asks for something the user already rejected this session.
+3. If actionable, make the smallest fix that resolves it.
+4. If not, note it with a one-line reason for the final report.
+
+Do not apply `suggestion` fields blindly in bulk. Each is a proposal. Read it, confirm it fits the
+surrounding code, then apply.
+
+Never disable a rule, add a suppression comment, or weaken a test to make a finding go away. If a
+finding can only be cleared that way, treat it as not actionable and report it. A 5/5 bought by
+silencing the reviewer is worth nothing.
+
+### Step 5: Commit and re-review
+
+Stage **only the files you edited in Step 4**, by path:
+
 ```bash
-gh pr comment <PR_NUMBER> --body "greploop: resolved <N> comments"
+git add -- src/auth.ts src/db.ts        # the paths you actually changed
+git commit -m "address greptile review feedback"
 ```
 
-**GitLab:**
+Never `git add -A` or `git add .` here. This loop runs unattended across several iterations, and a
+catch-all stage sweeps in whatever else appeared in the worktree (scratch files, build output, a
+`.env` someone dropped in) and buries it in a commit labelled as review feedback. Keep a list of
+the paths you touched as you fix, and stage exactly that list.
+
+Staging by path is only safe if those files still contain exactly what you wrote. Step 1 started
+clean, but the loop runs for minutes, and someone editing in their IDE meanwhile would have their
+change staged wholesale under your commit message. Before staging, confirm each path still matches
+your edit. Re-read it, or diff it against what you intended:
+
 ```bash
-glab mr note <MR_IID> --message "greploop: resolved <N> comments"
+git diff -- src/auth.ts     # every hunk here should be one you made
 ```
 
-### 5. Report
+If a file changed underneath you, **stop the loop** and tell the user which file and why. Do not
+stage it, and do not try to separate their hunks from yours.
 
-After finishing, summarize:
+If `git status --porcelain` shows changes in files you did **not** edit, leave them alone and note
+them in the final report. They are not yours to commit.
 
-| Field              | Value      |
-| ------------------ | ---------- |
-| Platform           | GitHub / GitLab |
-| Local iterations   | N          |
-| Final confidence   | X/5        |
-| Comments resolved  | N          |
-| Remaining comments | N (if any) |
+Return to **Step 2** and increment the iteration counter. Do not push. This loop stays local
+unless the user asks otherwise.
 
-If the loop exited due to max iterations, list any remaining unresolved findings and suggest next steps.
-
-For Perforce, see the report format in [references/perforce.md](references/perforce.md).
-
-## Output format
+### Step 6: Report
 
 ```
 Greploop complete.
-  Platform:         GitHub
-  Local iterations: 2
-  Confidence:       5/5
-  Resolved:         7 comments
-  Remaining:        0
+  Iterations:   2
+  Confidence:   5/5
+  Fixed:        7 findings
+  Remaining:    0
 ```
 
-If not fully resolved:
+When the loop stopped without a clean review, say so plainly and list what is left:
 
 ```
 Greploop stopped after 5 iterations.
-  Platform:         GitLab
-  Local iterations: 5
-  Confidence:       4/5
-  Resolved:         12 comments
-  Remaining:        2
+  Confidence:   4/5
+  Fixed:        12 findings
+  Remaining:    2
 
-Remaining issues:
-  - src/auth.ts:45 — "Consider rate limiting this endpoint"
-  - src/db.ts:112 — "Missing index on user_id column"
+Remaining:
+  - src/auth.ts:45 (P1) "Consider rate limiting this endpoint"
+    Not fixed: needs a product decision on limits.
+  - src/db.ts:112 (P2) "Missing index on user_id"
+    Not actionable: the index exists in migration 0043.
 ```
+
+Report the state you actually reached. A loop that ran out of iterations at 3/5 is a 3/5 result.
+Never describe it as complete.

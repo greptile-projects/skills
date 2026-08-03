@@ -72,19 +72,66 @@ mv "$tmp" "$dest"
 chmod 0755 "$dest"
 trap - EXIT INT TERM
 
-GREEN=''; BOLD=''; DIM=''; RESET=''
+GREEN=''; BOLD=''; DIM=''; RESET=''; FANCY=0
 if [ -t 2 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
-  case "${COLORTERM:-}" in
-    *truecolor*|*24bit*) GREEN='\033[38;2;40;233;159m' ;;
-    *)                   GREEN='\033[92m' ;;
-  esac
+  FANCY=1
+  GREEN='\033[38;2;40;233;159m' # Greptile CLI brand green: #28E99F
   BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
 fi
 
-{
-  printf '%b\n' "${GREEN}${BOLD}Greptile pre-push hook $action.${RESET}"
-  printf '  %-18s%s\n' "Hook:" "$dest"
-  printf '  %-18s%s\n' "Blocks below:" "$min_confidence/5 confidence"
-  printf '  %-18s%s\n' "Results:" "<repo>/.git/greptile/last-review.json"
-  printf '%b\n' "${DIM}  Bypass a push: git push --no-verify   (or GREPTILE_SKIP_REVIEW=1 git push)${RESET}"
-} >&2
+if [ "$FANCY" = 1 ]; then
+  # Match the Greptile CLI's neofetch-style mark, color, and spacing.
+  set -- \
+    "${GREEN}${BOLD}Greptile pre-push hook $action.${RESET}" \
+    "${DIM}────────────────────────────${RESET}" \
+    "${BOLD}Hook:${RESET}          $dest" \
+    "${BOLD}Blocks below:${RESET}  $min_confidence/5 confidence" \
+    "${BOLD}Status:${RESET}        ${DIM}<repo>/.git/greptile/last-review.json${RESET}" \
+    "${BOLD}Bypass:${RESET}        git push --no-verify" \
+    "${BOLD}${RESET}               ${DIM}(or GREPTILE_SKIP_REVIEW=1 git push)${RESET}"
+  _pad=$(( (16 - $#) / 2 ))
+  [ "$_pad" -lt 0 ] && _pad=0
+  printf '\n' >&2
+  while IFS= read -r _line; do
+    if [ "$_pad" -gt 0 ]; then
+      _info=''
+      _pad=$((_pad-1))
+    elif [ $# -gt 0 ]; then
+      _info=$1
+      shift
+    else
+      _info=''
+    fi
+    printf ' %b%-28s%b   %b\n' "${BOLD}${GREEN}" "$_line" "$RESET" "$_info" >&2
+  done <<'LOGO'
+            .##.
+          .######+
+        -######## .+
+     .######### .####+.
+   .########    ########.
+ -########        ########.
+ ########+.       +########
+#+. ########.  .######### .#
+####. ################  +###
+######. ############ .######
+  ######. ######## .#######
+    ######. ###  -#######
+      ######+ .#######
+        ##### ######
+          ### ####
+            # #
+LOGO
+  while [ $# -gt 0 ]; do
+    printf ' %-28s   %b\n' '' "$1" >&2
+    shift
+  done
+  printf '\n' >&2
+else
+  {
+    printf 'Greptile pre-push hook %s.\n' "$action"
+    printf '  %-18s%s\n' "Hook:" "$dest"
+    printf '  %-18s%s\n' "Blocks below:" "$min_confidence/5 confidence"
+    printf '  %-18s%s\n' "Status:" "<repo>/.git/greptile/last-review.json"
+    printf '  Bypass a push: git push --no-verify   (or GREPTILE_SKIP_REVIEW=1 git push)\n'
+  } >&2
+fi

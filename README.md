@@ -7,6 +7,7 @@ Skills for reviewing code with Greptile.
 - `review-changes` — Review local changes.
 - `address-pr-feedback` — Address review feedback.
 - `greploop` — Fix changes until Greptile gives them a 5/5 review.
+- `greptile-cli` — Reference for Greptile CLI commands, output, and workflows.
 
 ## Install
 
@@ -30,8 +31,9 @@ codex plugin add greptile@greptile
 
 ## Pre-push hook
 
-A git hook that blocks pushes unless `greptile review` scores 5/5. Results are
-saved to `.git/greptile/last-review.json`.
+A git hook that blocks pushes unless `greptile review` scores 5/5. The compact
+review status is saved to `.git/greptile/last-review.json`. Interactive pushes
+show Greptile's native rich report; non-interactive runs keep output compact.
 
 ```bash
 sh hooks/install.sh --repo /path/to/your/repo
