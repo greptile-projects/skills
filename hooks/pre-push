@@ -126,7 +126,7 @@ fi
 
 head_sha=$(git rev-parse HEAD 2>/dev/null || true)
 push_sha=''
-skipped_ref=0
+unreviewable=''
 while read -r local_ref local_sha _remote_ref _remote_sha; do
   [ -n "$local_ref" ] || continue
   case "$local_sha" in
@@ -139,13 +139,19 @@ while read -r local_ref local_sha _remote_ref _remote_sha; do
   if [ -n "$head_sha" ] && [ "$local_sha" = "$head_sha" ]; then
     push_sha=$local_sha
   else
-    skipped_ref=1
+    unreviewable="$unreviewable ${local_ref#refs/heads/}"
   fi
 done
 
-[ "$skipped_ref" = 0 ] || notice "skipped refs other than the checked-out HEAD."
+# Only the checked-out commit can be reviewed, so refs that do not match it
+# would reach the remote unreviewed. Block instead of waving them through.
+if [ -n "$unreviewable" ]; then
+  block "cannot review refs other than the checked-out HEAD; push blocked." \
+    "  Unreviewed:$unreviewable" \
+    "  Check out each branch and push it on its own."
+fi
 if [ -z "$push_sha" ]; then
-  [ "$skipped_ref" = 1 ] || notice "skipped: nothing to review in this push."
+  notice "skipped: nothing to review in this push."
   exit 0
 fi
 
