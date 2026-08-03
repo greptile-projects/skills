@@ -86,9 +86,7 @@ if [ "$FANCY" = 1 ]; then
     "${DIM}────────────────────────────${RESET}" \
     "${BOLD}Hook:${RESET}          $dest" \
     "${BOLD}Blocks below:${RESET}  $min_confidence/5 confidence" \
-    "${BOLD}Status:${RESET}        ${DIM}<repo>/.git/greptile/last-review.json${RESET}" \
-    "${BOLD}Bypass:${RESET}        git push --no-verify" \
-    "${BOLD}${RESET}               ${DIM}(or GREPTILE_SKIP_REVIEW=1 git push)${RESET}"
+    "${DIM}Bypass once with git push --no-verify (or GREPTILE_SKIP_REVIEW=1 git push).${RESET}"
   _pad=$(( (16 - $#) / 2 ))
   [ "$_pad" -lt 0 ] && _pad=0
   printf '\n' >&2
@@ -131,7 +129,6 @@ else
     printf 'Greptile pre-push hook %s.\n' "$action"
     printf '  %-18s%s\n' "Hook:" "$dest"
     printf '  %-18s%s\n' "Blocks below:" "$min_confidence/5 confidence"
-    printf '  %-18s%s\n' "Status:" "<repo>/.git/greptile/last-review.json"
     printf '  Bypass a push: git push --no-verify   (or GREPTILE_SKIP_REVIEW=1 git push)\n'
   } >&2
 fi

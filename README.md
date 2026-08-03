@@ -31,12 +31,14 @@ codex plugin add greptile@greptile
 
 ## Pre-push hook
 
-A git hook that blocks pushes unless `greptile review` scores 5/5. The compact
-review status is saved to `.git/greptile/last-review.json`. Interactive pushes
-show Greptile's native rich report; non-interactive runs keep output compact.
+A git hook that blocks pushes unless `greptile review` scores 5/5. Interactive
+pushes show Greptile's native rich report; non-interactive runs keep output
+compact.
 
 ```bash
 sh hooks/install.sh --repo /path/to/your/repo
 ```
 
 Bypass with `git push --no-verify` or `GREPTILE_SKIP_REVIEW=1 git push`.
+Review execution is capped at five minutes by default; set
+`GREPTILE_REVIEW_TIMEOUT_SECONDS` to a positive number of seconds to override it.
