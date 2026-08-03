@@ -3,6 +3,7 @@
 # Blocks pushes unless the current commit has a Greptile confidence score at
 # or above MIN_CONFIDENCE. Bypass once with git push --no-verify.
 MIN_CONFIDENCE=5 # baked by installer; runtime override: GREPTILE_MIN_CONFIDENCE=<1-5>
+MAX_STATUS_POLLS=150 # wait at most five minutes for an in-flight review
 
 set -u
 
@@ -290,13 +291,19 @@ fi
 
 if [ "$STATUS_RC" -eq 3 ]; then
   notice "waiting for the in-flight review of this commit."
-  while [ "$STATUS_RC" -eq 3 ]; do
+  _polls=0
+  while [ "$STATUS_RC" -eq 3 ] && [ "$_polls" -lt "$MAX_STATUS_POLLS" ]; do
     sleep 2
     read_status
+    _polls=$((_polls + 1))
   done
   if [ "$STATUS_RC" -eq 0 ]; then
     save_status
     finish
+  fi
+  if [ "$STATUS_RC" -eq 3 ]; then
+    block "review is still running after five minutes; push blocked." \
+      "Wait for it to finish, then push again."
   fi
 fi
 

@@ -27,6 +27,7 @@ case ${0##*/} in
             "$MOCK_SHA" "$MOCK_SHA"
           exit 0
           ;;
+        stuck) exit 3 ;;
       esac
     fi
     exit 1
@@ -81,6 +82,17 @@ run_hook in-flight "$url" >/dev/null 2>&1
 test "$(grep -c '^review status ' "$calls")" -eq 2
 if grep -q '^review --' "$calls"; then
   echo "an in-flight review was restarted instead of polled" >&2
+  exit 1
+fi
+
+if run_hook stuck "$url" >"$test_dir/output" 2>&1; then
+  echo "expected a persistently in-flight review to time out" >&2
+  exit 1
+fi
+grep -q 'review is still running after five minutes' "$test_dir/output"
+test "$(grep -c '^review status ' "$calls")" -eq 151
+if grep -q '^review --' "$calls"; then
+  echo "a timed-out review was restarted instead of blocking" >&2
   exit 1
 fi
 
