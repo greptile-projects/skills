@@ -6,6 +6,9 @@ MIN_CONFIDENCE=5 # baked by installer; runtime override: GREPTILE_MIN_CONFIDENCE
 
 set -u
 
+push_remote=${1:-}
+push_url=${2:-}
+
 # --- output ------------------------------------------------------------------
 
 GREEN=''; DIM=''; RED=''; RESET=''; INTERACTIVE=0
@@ -80,18 +83,19 @@ else
   JSON_PARSER=''
 fi
 
-# Sets confidence, finding count, and run ID from a review status file.
+# Sets the reviewed commit, confidence, finding count, and run ID from a review
+# status file.
 parse_json() {
   _file=$1
   case "$JSON_PARSER" in
     node)
       _values=$(node -e '
         const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-        console.log([j.confidence??"",j.commentCount??0,j.runId??""].join("|"));
+        console.log([j.commit??"",j.headSha??"",j.confidence??"",j.commentCount??0,j.runId??""].join("|"));
       ' "$_file" 2>/dev/null) || return 1
       ;;
     jq)
-      _values=$(jq -r '[.confidence // "", .commentCount // 0, .runId // ""] | @tsv' "$_file" 2>/dev/null | tr '\t' '|') || return 1
+      _values=$(jq -r '[.commit // "", .headSha // "", .confidence // "", .commentCount // 0, .runId // ""] | @tsv' "$_file" 2>/dev/null | tr '\t' '|') || return 1
       ;;
     *) return 1 ;;
   esac
@@ -101,9 +105,11 @@ parse_json() {
   # shellcheck disable=SC2086
   set -- $_values
   IFS=$_old_ifs
-  JSON_CONFIDENCE=${1:-}
-  JSON_COUNT=${2:-0}
-  JSON_RUN_ID=${3:-}
+  JSON_COMMIT=${1:-}
+  JSON_HEAD_SHA=${2:-}
+  JSON_CONFIDENCE=${3:-}
+  JSON_COUNT=${4:-0}
+  JSON_RUN_ID=${5:-}
 }
 
 # --- configuration -----------------------------------------------------------
@@ -156,6 +162,34 @@ if [ -z "$push_sha" ]; then
   exit 0
 fi
 
+# Greptile resolves the repository from the branch's upstream remote, then
+# origin, then the sole configured remote. Refuse to gate a different remote
+# with that review, since its organization rules and default base may differ.
+branch=$(git branch --show-current 2>/dev/null || true)
+review_remote=''
+if [ -n "$branch" ]; then
+  review_remote=$(git config --get "branch.$branch.remote" 2>/dev/null || true)
+  git remote get-url "$review_remote" >/dev/null 2>&1 || review_remote=''
+fi
+if [ -z "$review_remote" ] && git remote get-url origin >/dev/null 2>&1; then
+  review_remote=origin
+fi
+if [ -z "$review_remote" ]; then
+  _remotes=$(git remote 2>/dev/null || true)
+  if [ "$(printf '%s\n' "$_remotes" | sed '/^$/d' | wc -l | tr -d ' ')" = 1 ]; then
+    review_remote=$_remotes
+  fi
+fi
+if [ -n "$review_remote" ]; then
+  review_url=$(git remote get-url "$review_remote" 2>/dev/null || true)
+  if [ -z "$push_url" ] || [ "$push_url" != "$review_url" ]; then
+    block "push target differs from Greptile's review remote; push blocked." \
+      "  Push target: ${push_remote:-unknown} (${push_url:-unknown})" \
+      "  Review remote: $review_remote ($review_url)" \
+      "  Push that remote, or change this branch's upstream before reviewing."
+  fi
+fi
+
 # --- files and helpers -------------------------------------------------------
 
 gdir=$(git rev-parse --path-format=absolute --git-path greptile 2>/dev/null) \
@@ -163,7 +197,8 @@ gdir=$(git rev-parse --path-format=absolute --git-path greptile 2>/dev/null) \
 mkdir -p "$gdir"
 JSON_PATH="$gdir/last-review.json"
 DISPLAY_JSON_PATH=$(git rev-parse --git-path greptile/last-review.json 2>/dev/null || printf '%s' "$JSON_PATH")
-STATUS_PATH="$gdir/last-review.status.tmp"
+STATUS_PATH=$(mktemp "$gdir/last-review.status.XXXXXX") \
+  || block "could not create a temporary review status file; push blocked."
 
 # shellcheck disable=SC2329 # invoked by trap
 cleanup() {
@@ -201,19 +236,19 @@ read_status() {
   STATUS_RC=$?
   if [ "$STATUS_RC" -eq 0 ]; then
     parse_json "$STATUS_PATH" || block "could not read review status; push blocked."
+    [ "$JSON_COMMIT" = "$push_sha" ] \
+      || block "review status was for a different commit; push blocked."
+    if [ -n "$JSON_HEAD_SHA" ] && [ "$JSON_HEAD_SHA" != "$push_sha" ]; then
+      block "review result was for a different head commit; push blocked."
+    fi
   else
-    JSON_CONFIDENCE=''; JSON_COUNT=0; JSON_RUN_ID=''
+    JSON_COMMIT=''; JSON_HEAD_SHA=''; JSON_CONFIDENCE=''; JSON_COUNT=0; JSON_RUN_ID=''
   fi
 }
 
 run_review() {
-  if [ "$1" = "resume" ]; then
-    _display='greptile review --resume'
-    set -- --resume
-  else
-    _display='greptile review'
-    set --
-  fi
+  _display='greptile review'
+  set --
 
   if [ "$INTERACTIVE" != 1 ]; then
     _display="$_display --json"
@@ -253,15 +288,24 @@ if [ "$STATUS_RC" -eq 0 ]; then
   finish
 fi
 
+if [ "$STATUS_RC" -eq 3 ]; then
+  notice "waiting for the in-flight review of this commit."
+  while [ "$STATUS_RC" -eq 3 ]; do
+    sleep 2
+    read_status
+  done
+  if [ "$STATUS_RC" -eq 0 ]; then
+    save_status
+    finish
+  fi
+fi
+
 # A completed review gates any push by commit, but starting one needs a
 # checked-out branch for the CLI to diff against a base.
-if [ -z "$(git branch --show-current 2>/dev/null)" ]; then
+if [ -z "$branch" ]; then
   block "no completed review for this commit, and one cannot start from a detached HEAD; push blocked." \
     "Check out a branch and push again."
 fi
-
-resume=0
-[ "$STATUS_RC" -eq 3 ] && resume=1
 
 if [ "${GREPTILE_AUTO_REVIEW:-}" != "1" ] && [ "$INTERACTIVE" = 1 ] && [ -e /dev/tty ]; then
   printf '%b' "${DIM}[greptile]${RESET} Review before push? ${DIM}(Y/n)${RESET} " >&2
@@ -272,11 +316,7 @@ if [ "${GREPTILE_AUTO_REVIEW:-}" != "1" ] && [ "$INTERACTIVE" = 1 ] && [ -e /dev
   esac
 fi
 
-if [ "$resume" = 1 ]; then
-  run_review resume
-else
-  run_review new
-fi
+run_review
 
 read_status
 [ "$STATUS_RC" -eq 0 ] \
