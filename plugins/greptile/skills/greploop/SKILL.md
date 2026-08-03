@@ -1,6 +1,6 @@
 ---
 name: greploop
-description: Iteratively fixes a change until Greptile gives a 5/5 confidence score with zero unresolved comments. On GitHub and GitLab it iterates locally with the Greptile CLI, then pushes and syncs the PR/MR once at the end; on Perforce it uses the hosted shelve-review loop. Use when the user wants to fully optimize a change against Greptile's code review standards.
+description: Fix changes until Greptile gives them a 5/5 review.
 ---
 
 # Greploop

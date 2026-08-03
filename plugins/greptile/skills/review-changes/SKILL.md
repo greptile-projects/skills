@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: Runs a Greptile review for the current local branch, preparing the Greptile client and authentication when needed, then summarizes actionable findings. Use when the user wants feedback on unsubmitted changes, before opening a PR, outside a hosted PR review flow, or directly from a local checkout.
+description: Review local changes with Greptile.
 ---
 
 # Review Changes

@@ -4,7 +4,7 @@
   "groupings": [
     {
       "title": "Greptile",
-      "description": "Greptile is an AI code reviewer that uses full codebase context to review changes, address feedback, and improve pull requests.",
+      "description": "Review code with Greptile.",
       "skills": [
         "review-changes",
         "address-pr-feedback",

@@ -1,6 +1,6 @@
 ---
 name: address-pr-feedback
-description: Checks a GitHub, GitLab, or Perforce pull request, merge request, or shelved changelist for unresolved feedback, failing checks, and incomplete descriptions; then categorizes, fixes, and resolves actionable items. Use when the user asks to address review feedback or prepare a change for submission.
+description: Address code review feedback.
 ---
 
 # Address PR Feedback
