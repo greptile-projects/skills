@@ -3,7 +3,6 @@
 # Blocks pushes unless the current commit has a Greptile confidence score at
 # or above MIN_CONFIDENCE. Bypass once with git push --no-verify.
 MIN_CONFIDENCE=5 # baked by installer; runtime override: GREPTILE_MIN_CONFIDENCE=<1-5>
-MAX_STATUS_POLLS=150 # wait at most five minutes for an in-flight review
 
 set -u
 
@@ -181,11 +180,21 @@ if [ -z "$review_remote" ]; then
     review_remote=$_remotes
   fi
 fi
-if [ -n "$review_remote" ]; then
-  review_url=$(git remote get-url "$review_remote" 2>/dev/null || true)
-  if [ -z "$push_url" ] || [ "$push_url" != "$review_url" ]; then
+# The push URL is empty when another pre-push chains this hook without
+# forwarding its arguments; with nothing to compare, skip the guard.
+if [ -n "$review_remote" ] && [ -n "$push_url" ]; then
+  # git hands the hook the remote's push URL, so match it against every push
+  # URL of the review remote (pushurl and multi-URL remotes included).
+  push_url_known=''
+  while IFS= read -r _url; do
+    [ "$push_url" = "$_url" ] && push_url_known=1
+  done <<EOF
+$(git remote get-url --push --all "$review_remote" 2>/dev/null)
+EOF
+  if [ -z "$push_url_known" ]; then
+    review_url=$(git remote get-url "$review_remote" 2>/dev/null || echo unknown)
     block "push target differs from Greptile's review remote; push blocked." \
-      "  Push target: ${push_remote:-unknown} (${push_url:-unknown})" \
+      "  Push target: ${push_remote:-unknown} ($push_url)" \
       "  Review remote: $review_remote ($review_url)" \
       "  Push that remote, or change this branch's upstream before reviewing."
   fi
@@ -207,7 +216,7 @@ cleanup() {
 }
 trap cleanup EXIT
 # Exit non-zero so git aborts the push; the EXIT trap handles cleanup.
-trap 'exit 130' INT TERM
+trap 'exit 130' HUP INT TERM
 
 save_status() {
   mv "$STATUS_PATH" "$JSON_PATH"
@@ -248,8 +257,13 @@ read_status() {
 }
 
 run_review() {
-  _display='greptile review'
-  set --
+  if [ "$1" = "resume" ]; then
+    _display='greptile review --resume'
+    set -- --resume
+  else
+    _display='greptile review'
+    set --
+  fi
 
   if [ "$INTERACTIVE" != 1 ]; then
     _display="$_display --json"
@@ -289,30 +303,15 @@ if [ "$STATUS_RC" -eq 0 ]; then
   finish
 fi
 
-if [ "$STATUS_RC" -eq 3 ]; then
-  notice "waiting for the in-flight review of this commit."
-  _polls=0
-  while [ "$STATUS_RC" -eq 3 ] && [ "$_polls" -lt "$MAX_STATUS_POLLS" ]; do
-    sleep 2
-    read_status
-    _polls=$((_polls + 1))
-  done
-  if [ "$STATUS_RC" -eq 0 ]; then
-    save_status
-    finish
-  fi
-  if [ "$STATUS_RC" -eq 3 ]; then
-    block "review is still running after five minutes; push blocked." \
-      "Wait for it to finish, then push again."
-  fi
-fi
-
 # A completed review gates any push by commit, but starting one needs a
 # checked-out branch for the CLI to diff against a base.
 if [ -z "$branch" ]; then
   block "no completed review for this commit, and one cannot start from a detached HEAD; push blocked." \
     "Check out a branch and push again."
 fi
+
+resume=0
+[ "$STATUS_RC" -eq 3 ] && resume=1
 
 if [ "${GREPTILE_AUTO_REVIEW:-}" != "1" ] && [ "$INTERACTIVE" = 1 ] && [ -e /dev/tty ]; then
   printf '%b' "${DIM}[greptile]${RESET} Review before push? ${DIM}(Y/n)${RESET} " >&2
@@ -323,7 +322,11 @@ if [ "${GREPTILE_AUTO_REVIEW:-}" != "1" ] && [ "$INTERACTIVE" = 1 ] && [ -e /dev
   esac
 fi
 
-run_review
+if [ "$resume" = 1 ]; then
+  run_review resume
+else
+  run_review new
+fi
 
 read_status
 [ "$STATUS_RC" -eq 0 ] \
