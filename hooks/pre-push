@@ -133,13 +133,14 @@ while read -r local_ref local_sha _remote_ref _remote_sha; do
     *[!0]*) ;;
     *) continue ;;
   esac
-  case "$local_ref" in
-    refs/tags/*) continue ;;
-  esac
-  if [ -n "$head_sha" ] && [ "$local_sha" = "$head_sha" ]; then
-    push_sha=$local_sha
+  # Peel annotated tags to the commit they carry; skip refs with no commits.
+  commit_sha=$(git rev-parse --verify --quiet "$local_sha^{commit}" 2>/dev/null) || continue
+  if [ -n "$head_sha" ] && [ "$commit_sha" = "$head_sha" ]; then
+    push_sha=$head_sha
   else
-    unreviewable="$unreviewable ${local_ref#refs/heads/}"
+    _name=${local_ref#refs/heads/}
+    _name=${_name#refs/tags/}
+    unreviewable="$unreviewable $_name"
   fi
 done
 
@@ -148,7 +149,7 @@ done
 if [ -n "$unreviewable" ]; then
   block "cannot review refs other than the checked-out HEAD; push blocked." \
     "  Unreviewed:$unreviewable" \
-    "  Check out each branch and push it on its own."
+    "  Check out each ref's commit and push it on its own."
 fi
 if [ -z "$push_sha" ]; then
   notice "skipped: nothing to review in this push."
