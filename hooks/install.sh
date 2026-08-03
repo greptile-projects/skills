@@ -49,7 +49,7 @@ mkdir -p "$(dirname "$dest")"
 
 tmp="$dest.greptile-tmp.$$"
 trap 'rm -f "$tmp"' EXIT INT TERM
-sed "s/^MIN_CONFIDENCE=.*/MIN_CONFIDENCE=$min_confidence # baked by installer; runtime override: GREPTILE_MIN_CONFIDENCE=<1-5>/" "$src" >"$tmp"
+sed "s/^MIN_CONFIDENCE=.*/MIN_CONFIDENCE=$min_confidence # baked by installer/" "$src" >"$tmp"
 chmod 0755 "$tmp"
 
 action=installed

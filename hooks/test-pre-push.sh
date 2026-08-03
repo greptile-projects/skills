@@ -17,7 +17,7 @@ case ${0##*/} in
           printf '{"commit":"%040d","headSha":"%040d","confidence":5,"commentCount":0,"runId":"run-2"}\n' 0 0
           exit 0
           ;;
-        in-flight|stalled-resume)
+        in-flight)
           # Running until the hook resumes it, completed afterwards.
           if [ ! -e "$MOCK_STATE" ]; then
             exit 3
@@ -43,10 +43,6 @@ case ${0##*/} in
         in-flight|new-review)
           : >"$MOCK_STATE"
           exit 0
-          ;;
-        stalled-resume)
-          trap 'exit 143' TERM
-          while :; do sleep 1; done
           ;;
       esac
     fi
@@ -84,7 +80,7 @@ run_hook() {
     cd "$test_dir/repo"
     PATH="$test_dir/bin:$PATH" TMPDIR="$test_dir/tmp" \
       MOCK_CALLS="$calls" MOCK_MODE="$_mode" MOCK_SHA="$sha" MOCK_STATE="$state" \
-      GREPTILE_AUTO_REVIEW=1 GREPTILE_REVIEW_TIMEOUT_SECONDS=1 \
+      GREPTILE_AUTO_REVIEW=1 \
       "$hook" origin "$_url"
   )
 }
@@ -104,13 +100,6 @@ test "$(grep -c '^review status ' "$calls")" -eq 2
 run_hook in-flight "$url" >/dev/null 2>&1
 grep -q '^review --resume --json$' "$calls"
 test "$(grep -c '^review status ' "$calls")" -eq 2
-
-if run_hook stalled-resume "$url" >"$test_dir/output" 2>&1; then
-  echo "expected a stalled in-flight review to block the push" >&2
-  exit 1
-fi
-grep -q 'review did not finish within 1 seconds' "$test_dir/output"
-grep -q '^review --resume --json$' "$calls"
 
 if run_hook review-fails "$url" >"$test_dir/output" 2>&1; then
   echo "expected a failed review to block the push" >&2
@@ -141,10 +130,5 @@ git -C "$test_dir/repo" remote set-url --delete origin "$second_url"
 # A chained pre-push that does not forward hook arguments leaves the push
 # URL empty; the guard has nothing to compare and must not block.
 run_hook completed "" >/dev/null 2>&1
-
-if find "$test_dir/tmp" -name 'greptile-review-status.*' -print -quit | grep -q .; then
-  echo "temporary review status file was not cleaned up" >&2
-  exit 1
-fi
 
 echo "pre-push hook tests passed"

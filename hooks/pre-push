@@ -2,8 +2,7 @@
 # greptile-pre-push-hook v1
 # Blocks pushes unless the current commit has a Greptile confidence score at
 # or above MIN_CONFIDENCE. Bypass once with git push --no-verify.
-MIN_CONFIDENCE=5 # baked by installer; runtime override: GREPTILE_MIN_CONFIDENCE=<1-5>
-MAX_REVIEW_SECONDS=300 # runtime override: GREPTILE_REVIEW_TIMEOUT_SECONDS=<seconds>
+MIN_CONFIDENCE=5 # baked by installer
 
 set -u
 
@@ -12,13 +11,14 @@ push_url=${2:-}
 
 # --- output ------------------------------------------------------------------
 
-GREEN=''; DIM_GREEN=''; DIM=''; RED=''; RESET=''; INTERACTIVE=0
+GREEN=''; DIM_GREEN=''; YELLOW=''; DIM=''; RED=''; RESET=''; INTERACTIVE=0
 if [ -t 2 ] && [ "${TERM:-}" != "dumb" ]; then
   INTERACTIVE=1
 fi
 if [ "$INTERACTIVE" = 1 ] && [ -z "${NO_COLOR:-}" ]; then
   GREEN='\033[38;2;40;233;159m'
   DIM_GREEN='\033[38;2;26;151;103m'
+  YELLOW='\033[33m'
   DIM='\033[2m'; RED='\033[31m'; RESET='\033[0m'
 fi
 PREFIX="${DIM}[${RESET}${DIM_GREEN}greptile${RESET}${DIM}]${RESET}"
@@ -63,10 +63,10 @@ block() {
 pass() {
   _confidence=$1
   _count=$2
-  if [ "$_count" -gt 0 ] 2>/dev/null; then
-    _findings=$_count
-  else
+  if [ "$_count" = 0 ]; then
     _findings=none
+  else
+    _findings=$_count
   fi
   say ""
   say "${PREFIX} ${GREEN}review passed${RESET}"
@@ -77,31 +77,16 @@ pass() {
 
 # --- JSON --------------------------------------------------------------------
 
-if command -v node >/dev/null 2>&1; then
-  JSON_PARSER=node
-elif command -v jq >/dev/null 2>&1; then
-  JSON_PARSER=jq
-else
-  JSON_PARSER=''
-fi
-
-# Sets the reviewed commit, confidence, finding count, and run ID from a review
-# status file.
+# Prints pipe-delimited status fields from review JSON on stdin.
 parse_json() {
-  _file=$1
-  case "$JSON_PARSER" in
-    node)
-      _values=$(node -e '
-        const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-        console.log([j.commit??"",j.headSha??"",j.confidence??"",j.commentCount??0,j.runId??""].join("|"));
-      ' "$_file" 2>/dev/null) || return 1
-      ;;
-    jq)
-      _values=$(jq -r '[.commit // "", .headSha // "", .confidence // "", .commentCount // 0, .runId // ""] | @tsv' "$_file" 2>/dev/null | tr '\t' '|') || return 1
-      ;;
-    *) return 1 ;;
-  esac
+  node -e '
+    const j=JSON.parse(require("fs").readFileSync(0,"utf8"));
+    console.log([j.commit??"",j.headSha??"",j.confidence??"",j.commentCount??0,j.runId??""].join("|"));
+  ' 2>/dev/null
+}
 
+load_status_fields() {
+  _values=$1
   _old_ifs=$IFS
   IFS='|'
   # shellcheck disable=SC2086
@@ -119,24 +104,6 @@ parse_json() {
 if [ "${GREPTILE_SKIP_REVIEW:-}" = "1" ]; then
   notice "skipped: GREPTILE_SKIP_REVIEW=1 set."
   exit 0
-fi
-
-min=$MIN_CONFIDENCE
-if [ -n "${GREPTILE_MIN_CONFIDENCE:-}" ]; then
-  case "$GREPTILE_MIN_CONFIDENCE" in
-    [1-5]) min=$GREPTILE_MIN_CONFIDENCE ;;
-    *) notice "ignoring invalid GREPTILE_MIN_CONFIDENCE='$GREPTILE_MIN_CONFIDENCE'; using $MIN_CONFIDENCE." ;;
-  esac
-fi
-
-review_timeout=$MAX_REVIEW_SECONDS
-if [ -n "${GREPTILE_REVIEW_TIMEOUT_SECONDS:-}" ]; then
-  case "$GREPTILE_REVIEW_TIMEOUT_SECONDS" in
-    0|*[!0-9]*)
-      notice "ignoring invalid GREPTILE_REVIEW_TIMEOUT_SECONDS='$GREPTILE_REVIEW_TIMEOUT_SECONDS'; using $MAX_REVIEW_SECONDS."
-      ;;
-    *) review_timeout=$GREPTILE_REVIEW_TIMEOUT_SECONDS ;;
-  esac
 fi
 
 # --- pushed commit -----------------------------------------------------------
@@ -212,30 +179,7 @@ EOF
   fi
 fi
 
-# --- files and helpers -------------------------------------------------------
-
-STATUS_PATH=$(mktemp "${TMPDIR:-/tmp}/greptile-review-status.XXXXXX") \
-  || block "could not create a temporary review status file; push blocked."
-TIMEOUT_PATH="$STATUS_PATH.timeout"
-REVIEW_PID=''
-WATCHDOG_PID=''
-
-# shellcheck disable=SC2329 # invoked by trap
-cleanup() {
-  if [ -n "$WATCHDOG_PID" ]; then
-    kill "$WATCHDOG_PID" 2>/dev/null || true
-    wait "$WATCHDOG_PID" 2>/dev/null || true
-  fi
-  if [ -n "$REVIEW_PID" ]; then
-    kill "$REVIEW_PID" 2>/dev/null || true
-    kill -KILL "$REVIEW_PID" 2>/dev/null || true
-    wait "$REVIEW_PID" 2>/dev/null || true
-  fi
-  rm -f "$STATUS_PATH" "$TIMEOUT_PATH"
-}
-trap cleanup EXIT
-# Exit non-zero so git aborts the push; the EXIT trap handles cleanup.
-trap 'exit 130' HUP INT TERM
+# --- review gate -------------------------------------------------------------
 
 finish() {
   case "$JSON_CONFIDENCE" in
@@ -243,23 +187,25 @@ finish() {
     *) block "review returned no confidence score; push blocked." ;;
   esac
 
-  if [ "$JSON_CONFIDENCE" -ge "$min" ]; then
+  if [ "$JSON_CONFIDENCE" -ge "$MIN_CONFIDENCE" ]; then
     pass "$JSON_CONFIDENCE" "$JSON_COUNT"
     exit 0
   fi
   say ""
   say "${PREFIX} ${RED}push blocked${RESET}"
-  row "Confidence" "$JSON_CONFIDENCE/5 (requires $min/5)"
+  row "Confidence" "$JSON_CONFIDENCE/5 (requires $MIN_CONFIDENCE/5)"
   row "Findings" "$JSON_COUNT"
   tips blocked
   exit 1
 }
 
 read_status() {
-  greptile review status --commit "$push_sha" --json >"$STATUS_PATH" 2>/dev/null
+  _json=$(greptile review status --commit "$push_sha" --json 2>/dev/null)
   STATUS_RC=$?
   if [ "$STATUS_RC" -eq 0 ]; then
-    parse_json "$STATUS_PATH" || block "could not read review status; push blocked."
+    _values=$(printf '%s' "$_json" | parse_json) || _values=
+    [ -n "$_values" ] || block "could not read review status; push blocked."
+    load_status_fields "$_values"
     [ "$JSON_COMMIT" = "$push_sha" ] \
       || block "review status was for a different commit; push blocked."
     if [ -n "$JSON_HEAD_SHA" ] && [ "$JSON_HEAD_SHA" != "$push_sha" ]; then
@@ -271,59 +217,32 @@ read_status() {
 }
 
 run_review() {
-  if [ "$1" = "resume" ]; then
-    _display='greptile review --resume'
-    set -- --resume
+  if [ "${1:-}" = --resume ]; then
+    set -- review --resume
   else
-    _display='greptile review'
-    set --
+    set -- review
   fi
-
   if [ "$INTERACTIVE" != 1 ]; then
-    _display="$_display --json"
     set -- "$@" --json
   fi
   say ""
-  say "${PREFIX} ${DIM}\$ $_display${RESET}"
-  rm -f "$TIMEOUT_PATH"
+  say "${PREFIX} ${DIM}\$ greptile $*${RESET}"
   if [ "$INTERACTIVE" = 1 ]; then
     # Let the CLI own the terminal and render its final report and diagrams.
-    greptile review "$@" </dev/null &
+    greptile "$@" </dev/null
   else
     # In logs and CI, keep the full payload out of the hook output. The compact
     # status snapshot below is the result used by the gate.
-    greptile review "$@" </dev/null >/dev/null &
+    greptile "$@" </dev/null >/dev/null
   fi
-  REVIEW_PID=$!
-  (
-    sleep "$review_timeout"
-    : >"$TIMEOUT_PATH"
-    kill -TERM "$REVIEW_PID" 2>/dev/null || true
-    sleep 2
-    kill -KILL "$REVIEW_PID" 2>/dev/null || true
-  ) &
-  WATCHDOG_PID=$!
-
-  wait "$REVIEW_PID"
   _rc=$?
-  REVIEW_PID=''
-  kill "$WATCHDOG_PID" 2>/dev/null || true
-  wait "$WATCHDOG_PID" 2>/dev/null || true
-  WATCHDOG_PID=''
-
-  if [ -e "$TIMEOUT_PATH" ]; then
-    block "review did not finish within $review_timeout seconds; push blocked." \
-      "Wait for it to finish, then push again."
-  fi
   [ "$_rc" -eq 0 ] || block "review failed (exit code $_rc); push blocked."
 }
 
-# --- review ------------------------------------------------------------------
-
 command -v greptile >/dev/null 2>&1 \
   || block "Greptile CLI not found; push blocked." "Install it with: npm i -g greptile"
-[ -n "$JSON_PARSER" ] \
-  || block "node or jq is required to read review results; push blocked."
+command -v node >/dev/null 2>&1 \
+  || block "node is required to read review results; push blocked."
 
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
   notice "you have uncommitted changes; commit them and push again to include them in the review."
@@ -348,7 +267,10 @@ resume=0
 [ "$STATUS_RC" -eq 3 ] && resume=1
 
 if [ "${GREPTILE_AUTO_REVIEW:-}" != "1" ] && [ "$INTERACTIVE" = 1 ] && [ -e /dev/tty ]; then
-  printf '%b' "${PREFIX} Review before push? ${DIM}(Y/n)${RESET} " >&2
+  say ""
+  say "${YELLOW}!${RESET} You haven't run a Greptile review. Want to run it now? ${DIM}(Y/n)${RESET}"
+  say "${DIM}  On agent pushes, this happens automatically.${RESET}"
+  printf '%b' "> " >&2
   answer=''
   read -r answer </dev/tty 2>/dev/null || answer=''
   case "$answer" in
@@ -357,9 +279,9 @@ if [ "${GREPTILE_AUTO_REVIEW:-}" != "1" ] && [ "$INTERACTIVE" = 1 ] && [ -e /dev
 fi
 
 if [ "$resume" = 1 ]; then
-  run_review resume
+  run_review --resume
 else
-  run_review new
+  run_review
 fi
 
 read_status
