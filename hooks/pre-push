@@ -1,0 +1,297 @@
+#!/bin/sh
+# greptile-pre-push-hook v1
+# Installed by greptile. Blocks the push unless `greptile review` reports a
+# confidence score of at least MIN_CONFIDENCE out of 5. Fails closed: review
+# errors also block the push.
+# Bypass once: git push --no-verify   or   GREPTILE_SKIP_REVIEW=1 git push
+MIN_CONFIDENCE=5 # baked by installer; runtime override: GREPTILE_MIN_CONFIDENCE=<1-5>
+
+set -u
+
+REMOTE=${1:-origin}
+
+# --- output ------------------------------------------------------------------
+
+GREEN=''; BOLD=''; DIM=''; RED=''; RESET=''
+if [ -t 2 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+  case "${COLORTERM:-}" in
+    *truecolor*|*24bit*) GREEN='\033[38;2;40;233;159m' ;; # Greptile #28E99F
+    *)                   GREEN='\033[92m' ;;
+  esac
+  BOLD='\033[1m'; DIM='\033[2m'; RED='\033[31m'; RESET='\033[0m'
+fi
+
+say() { printf '%b\n' "$*" >&2; }
+row() { printf '  %-18s%s\n' "$1" "$2" >&2; }
+
+notice_skipped() {
+  say "${DIM}Greptile review skipped: $1${RESET}"
+}
+
+bypass_hint() {
+  say "To bypass this one push: git push --no-verify   (or GREPTILE_SKIP_REVIEW=1 git push)"
+}
+
+# --- blocking errors (all exit 1, fail-closed) -------------------------------
+
+block_no_cli() {
+  say "${RED}${BOLD}Greptile pre-push hook: \`greptile\` CLI not found — push blocked (fail-closed).${RESET}"
+  say "  To fix: install the CLI, then push again:"
+  say "    npm i -g greptile        (or: curl -fsSL \"https://greptile.com/cli/install\" | sh)"
+  bypass_hint
+  exit 1
+}
+
+block_no_auth() {
+  say "${RED}${BOLD}Greptile pre-push hook: not logged in — push blocked (fail-closed).${RESET}"
+  say "  To fix: run \`greptile login\`, then push again."
+  bypass_hint
+  exit 1
+}
+
+block_no_parser() {
+  say "${RED}${BOLD}Greptile pre-push hook: cannot parse review results (neither \`node\` nor \`jq\` found) — push blocked (fail-closed).${RESET}"
+  say "  Raw review JSON: $1"
+  say "  To fix: install node or jq, or read the JSON above directly — the push is"
+  say "  gated on its top-level \"confidence\" field (integer 1-5, minimum $2)."
+  bypass_hint
+  exit 1
+}
+
+block_review_error() {
+  _rc=$1; _detail=$2
+  say "${RED}${BOLD}Greptile review: command failed (exit $_rc) — push blocked (fail-closed).${RESET}"
+  [ -n "$_detail" ] && say "  $_detail"
+  say "  Inspect the review output above, fix the problem, and push again."
+  bypass_hint
+  exit 1
+}
+
+block_no_confidence() {
+  say "${RED}${BOLD}Greptile review: completed but returned no confidence score — push blocked (fail-closed).${RESET}"
+  say "  Full results:     $1"
+  say "  Inspect the JSON above, resolve any findings in .comments, and push again."
+  bypass_hint
+  exit 1
+}
+
+block_low_confidence() {
+  _conf=$1; _count=$2; _json=$3; _min=$4
+  say "${RED}${BOLD}Greptile review: push blocked.${RESET}"
+  row "Confidence:" "$_conf/5  (minimum required: $_min/5)"
+  row "Findings:" "$_count comments"
+  row "Full results:" "$_json"
+  say ""
+  say "Next steps (for you or your coding agent):"
+  say "  1. Read the JSON above — each .comments entry has path, startLine,"
+  say "     endLine, severity (P0/P1/P2), body, and a suggestion when available."
+  say "  2. Fix the findings, commit, and push again (the hook re-reviews)."
+  bypass_hint
+  exit 1
+}
+
+pass_summary() {
+  _conf=$1; _count=$2; _json=$3
+  say "${GREEN}${BOLD}Greptile review passed.${RESET}"
+  row "Confidence:" "$_conf/5"
+  if [ "$_count" -gt 0 ] 2>/dev/null; then
+    row "Findings:" "$_count comments (non-blocking)"
+  else
+    row "Findings:" "none"
+  fi
+  [ -n "$_json" ] && row "Full results:" "$_json"
+}
+
+# --- JSON parsing (node -> jq -> fail-closed) --------------------------------
+
+have_parser() {
+  command -v node >/dev/null 2>&1 || command -v jq >/dev/null 2>&1
+}
+
+# Prints the top-level confidence value ("" if null/missing); nonzero rc on
+# invalid JSON or missing parser. Never grep-parse: "confidence" can appear
+# inside comment bodies.
+json_confidence() {
+  if command -v node >/dev/null 2>&1; then
+    node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const v=j.confidence;console.log(v==null?"":v)' "$1" 2>/dev/null
+  elif command -v jq >/dev/null 2>&1; then
+    jq -r '.confidence // ""' "$1" 2>/dev/null
+  else
+    return 9
+  fi
+}
+
+json_comment_count() {
+  if command -v node >/dev/null 2>&1; then
+    node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(Array.isArray(j.comments)?j.comments.length:0)' "$1" 2>/dev/null
+  elif command -v jq >/dev/null 2>&1; then
+    jq -r '.comments | length' "$1" 2>/dev/null
+  else
+    return 9
+  fi
+}
+
+# --- bypass + threshold ------------------------------------------------------
+
+if [ "${GREPTILE_SKIP_REVIEW:-}" = "1" ]; then
+  notice_skipped "GREPTILE_SKIP_REVIEW=1 set."
+  exit 0
+fi
+
+min=$MIN_CONFIDENCE
+if [ -n "${GREPTILE_MIN_CONFIDENCE:-}" ]; then
+  case "$GREPTILE_MIN_CONFIDENCE" in
+    [1-5]) min=$GREPTILE_MIN_CONFIDENCE ;;
+    *) say "${DIM}Greptile pre-push hook: ignoring invalid GREPTILE_MIN_CONFIDENCE='$GREPTILE_MIN_CONFIDENCE' (want 1-5); using $MIN_CONFIDENCE.${RESET}" ;;
+  esac
+fi
+
+# --- decide what is being pushed ---------------------------------------------
+# stdin: one line per ref: <local ref> <local sha> <remote ref> <remote sha>
+
+HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || true)
+push_sha=''; skipped_refs=''
+# shellcheck disable=SC2034
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -n "$local_ref" ] || continue
+  case "$local_sha" in
+    *[!0]*) ;;
+    *) continue ;; # all-zero sha: branch deletion
+  esac
+  case "$local_ref" in
+    refs/tags/*) continue ;; # tags point at already-pushed history
+  esac
+  if [ -n "$HEAD_SHA" ] && [ "$local_sha" = "$HEAD_SHA" ]; then
+    push_sha=$local_sha
+  else
+    skipped_refs="$skipped_refs $local_ref"
+  fi
+done
+
+if [ -n "$skipped_refs" ]; then
+  notice_skipped "not reviewing$skipped_refs (not the checked-out HEAD; the review reflects the current worktree)."
+fi
+
+if [ -z "$push_sha" ]; then
+  [ -z "$skipped_refs" ] && notice_skipped "nothing to review in this push."
+  exit 0
+fi
+
+branch=$(git branch --show-current 2>/dev/null || true)
+if [ -z "$branch" ]; then
+  notice_skipped "detached HEAD; reviews are branch-vs-base."
+  exit 0
+fi
+
+default_branch=$(git symbolic-ref --short "refs/remotes/$REMOTE/HEAD" 2>/dev/null | sed "s|^$REMOTE/||" || true)
+if [ -n "$default_branch" ] && [ "$branch" = "$default_branch" ]; then
+  notice_skipped "pushing the default branch ($default_branch); reviews are branch-vs-base."
+  exit 0
+fi
+
+# --- prerequisites -----------------------------------------------------------
+
+command -v greptile >/dev/null 2>&1 || block_no_cli
+greptile whoami >/dev/null 2>&1 || block_no_auth
+
+gdir=$(git rev-parse --path-format=absolute --git-path greptile 2>/dev/null) \
+  || gdir="$(git rev-parse --absolute-git-dir)/greptile"
+mkdir -p "$gdir"
+json_path="$gdir/last-review.json"
+
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+  say "${DIM}Greptile pre-push hook: working tree has uncommitted changes; they will be included in the review but not in the push.${RESET}"
+fi
+
+# --- reuse probe (best-effort; never blocks) ---------------------------------
+
+resume=0
+probe="$gdir/status-probe.json"
+if greptile review status --commit "$push_sha" --json >"$probe" 2>/dev/null; then
+  probe_conf=$(json_confidence "$probe" 2>/dev/null || true)
+  case "$probe_conf" in
+    [1-5])
+      if [ "$probe_conf" -ge "$min" ]; then
+        rm -f "$probe"
+        meta_sha=$(sed -n 's/^sha=//p' "$gdir/last-review.meta" 2>/dev/null || true)
+        if [ "$meta_sha" = "$push_sha" ] && [ -f "$json_path" ]; then
+          pass_summary "$probe_conf" "$(json_comment_count "$json_path" 2>/dev/null || echo 0)" "$json_path"
+        else
+          pass_summary "$probe_conf" 0 ""
+          say "${DIM}  (cached hosted result for $push_sha; run \`greptile review --json\` for full comments)${RESET}"
+        fi
+        exit 0
+      fi
+      ;;
+  esac
+else
+  [ $? -eq 3 ] && resume=1 # review already in flight for this commit
+fi
+rm -f "$probe"
+
+# --- run the review ----------------------------------------------------------
+
+say "${GREEN}${BOLD}Greptile${RESET} reviewing before push${DIM} (branch $branch -> $REMOTE)...${RESET}"
+
+tmp="$json_path.tmp"
+if [ "$resume" = 1 ]; then
+  greptile review --resume --json </dev/null >"$tmp"
+else
+  greptile review --json </dev/null >"$tmp"
+fi
+rc=$?
+
+if [ $rc -eq 3 ] && [ "$resume" = 0 ]; then
+  say "${DIM}Greptile review already in progress; resuming...${RESET}"
+  greptile review --resume --json </dev/null >"$tmp"
+  rc=$?
+fi
+
+case $rc in
+  0) ;;
+  2)   block_review_error 2 "Invalid input — are you on a feature branch with commits ahead of the base?" ;;
+  3)   block_review_error 3 "Review is still in progress. Wait for it to finish, then push again (the hook will resume it)." ;;
+  4)   block_review_error 4 "Review failed server-side — push again to retry." ;;
+  5)   block_review_error 5 "Review was cancelled — push again to start a new one." ;;
+  130) block_review_error 130 "Review interrupted (Ctrl-C); push aborted. Push again to resume the review." ;;
+  *)   block_review_error "$rc" "" ;;
+esac
+
+# --- persist + gate ----------------------------------------------------------
+
+mv "$tmp" "$json_path"
+
+have_parser || block_no_parser "$json_path" "$min"
+confidence=$(json_confidence "$json_path") || block_no_confidence "$json_path"
+count=$(json_comment_count "$json_path" 2>/dev/null || echo 0)
+
+case "$confidence" in
+  [1-5]) result_ok=1 ;;
+  *) result_ok=0 ;;
+esac
+
+meta_tmp="$gdir/last-review.meta.tmp"
+{
+  printf 'sha=%s\n' "$push_sha"
+  printf 'branch=%s\n' "$branch"
+  printf 'timestamp=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  printf 'confidence=%s\n' "$confidence"
+  printf 'min_confidence=%s\n' "$min"
+  if [ "$result_ok" = 1 ] && [ "$confidence" -ge "$min" ]; then
+    printf 'result=pass\n'
+  elif [ "$result_ok" = 1 ]; then
+    printf 'result=block\n'
+  else
+    printf 'result=error\n'
+  fi
+} >"$meta_tmp"
+mv "$meta_tmp" "$gdir/last-review.meta"
+
+[ "$result_ok" = 1 ] || block_no_confidence "$json_path"
+
+if [ "$confidence" -ge "$min" ]; then
+  pass_summary "$confidence" "$count" "$json_path"
+  exit 0
+fi
+
+block_low_confidence "$confidence" "$count" "$json_path" "$min"

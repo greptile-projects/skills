@@ -11,19 +11,30 @@ Skills for reviewing code with Greptile.
 ## Install
 
 ```bash
-npx skills add greptileai/skills
+npx skills add greptile-projects/skills
 ```
 
 For Claude Code:
 
 ```bash
-claude plugin marketplace add greptileai/skills
+claude plugin marketplace add greptile-projects/skills
 claude plugin install greptile@greptile
 ```
 
 For Codex:
 
 ```bash
-codex plugin marketplace add greptileai/skills
+codex plugin marketplace add greptile-projects/skills
 codex plugin add greptile@greptile
 ```
+
+## Pre-push hook
+
+A git hook that blocks pushes unless `greptile review` scores 5/5. Results are
+saved to `.git/greptile/last-review.json`.
+
+```bash
+sh hooks/install.sh --repo /path/to/your/repo
+```
+
+Bypass with `git push --no-verify` or `GREPTILE_SKIP_REVIEW=1 git push`.
