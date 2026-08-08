@@ -1,7 +1,8 @@
 #!/bin/sh
-# greptile-pre-push-hook v1
-# Blocks pushes unless the current commit has a Greptile confidence score at
-# or above MIN_CONFIDENCE. Bypass once with git push --no-verify.
+# greptile-pre-push-hook v2
+# Blocks non-interactive pushes unless the current commit has a Greptile
+# confidence score at or above MIN_CONFIDENCE. Interactive pushes can confirm
+# a one-time override. Bypass explicitly with git push --no-verify.
 MIN_CONFIDENCE=5 # baked by installer
 
 set -u
@@ -191,10 +192,29 @@ finish() {
     pass "$JSON_CONFIDENCE" "$JSON_COUNT"
     exit 0
   fi
+
   say ""
-  say "${PREFIX} ${RED}push blocked${RESET}"
+  say "${PREFIX} ${YELLOW}review below required confidence${RESET}"
   row "Confidence" "$JSON_CONFIDENCE/5 (requires $MIN_CONFIDENCE/5)"
   row "Findings" "$JSON_COUNT"
+
+  if [ "$INTERACTIVE" = 1 ] && [ -e /dev/tty ]; then
+    say ""
+    say "${YELLOW}!${RESET} Push this commit anyway? ${DIM}(y/N)${RESET}"
+    printf '%b' "> " >&2
+    answer=''
+    read -r answer </dev/tty 2>/dev/null || answer=''
+    case "$answer" in
+      [Yy]*)
+        notice "override accepted; pushing despite the review result."
+        tips passed
+        exit 0
+        ;;
+    esac
+  fi
+
+  say ""
+  say "${PREFIX} ${RED}push blocked${RESET}"
   tips blocked
   exit 1
 }

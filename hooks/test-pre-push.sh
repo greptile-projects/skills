@@ -13,6 +13,11 @@ case ${0##*/} in
             "$MOCK_SHA" "$MOCK_SHA"
           exit 0
           ;;
+        low-confidence)
+          printf '{"commit":"%s","headSha":"%s","confidence":1,"commentCount":2,"runId":"run-low"}\n' \
+            "$MOCK_SHA" "$MOCK_SHA"
+          exit 0
+          ;;
         wrong-commit)
           printf '{"commit":"%040d","headSha":"%040d","confidence":5,"commentCount":0,"runId":"run-2"}\n' 0 0
           exit 0
@@ -86,6 +91,22 @@ run_hook() {
 }
 
 run_hook completed "$url" >/dev/null 2>&1
+
+# Non-interactive callers cannot accidentally accept a low-confidence review.
+if run_hook low-confidence "$url" >"$test_dir/output" 2>&1; then
+  echo "expected a low-confidence non-interactive push to be blocked" >&2
+  exit 1
+fi
+grep -q 'review below required confidence' "$test_dir/output"
+grep -q 'push blocked' "$test_dir/output"
+
+# The explicit environment bypass still skips the gate entirely.
+if ! (GREPTILE_SKIP_REVIEW=1 run_hook low-confidence "$url") >"$test_dir/output" 2>&1; then
+  echo "expected GREPTILE_SKIP_REVIEW=1 to bypass the review gate" >&2
+  exit 1
+fi
+grep -q 'GREPTILE_SKIP_REVIEW=1 set' "$test_dir/output"
+test ! -s "$calls"
 
 if run_hook wrong-commit "$url" >"$test_dir/output" 2>&1; then
   echo "expected a mismatched status commit to block the push" >&2

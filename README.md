@@ -31,9 +31,10 @@ codex plugin add greptile@greptile
 
 ## Pre-push hook
 
-A git hook that blocks pushes unless `greptile review` scores 5/5. Interactive
-pushes show Greptile's native rich report; non-interactive runs keep output
-compact.
+A git hook that requires `greptile review` to score 5/5. After a lower score,
+interactive pushes offer a default-deny “push anyway?” confirmation;
+non-interactive pushes remain blocked. Interactive reviews show Greptile's
+native rich report, while non-interactive runs keep output compact.
 
 ```bash
 sh hooks/install.sh --repo /path/to/your/repo
