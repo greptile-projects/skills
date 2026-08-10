@@ -9,7 +9,7 @@ Install the Greptile pre-push review hook into a git repository.
 
 Usage: install.sh [options]
   --repo <path>            Target repository (default: current directory)
-  --min-confidence <1-5>   Block pushes below this confidence score (default: 5)
+  --min-confidence <1-5>   Require confirmation below this score (default: 5)
   -h, --help               Show this help
 
 The hook path respects core.hooksPath. An existing non-greptile pre-push hook
@@ -85,7 +85,7 @@ if [ "$FANCY" = 1 ]; then
     "${GREEN}${BOLD}Greptile pre-push hook $action.${RESET}" \
     "${DIM}────────────────────────────${RESET}" \
     "${BOLD}Hook:${RESET}          $dest" \
-    "${BOLD}Blocks below:${RESET}  $min_confidence/5 confidence" \
+    "${BOLD}Confirms below:${RESET} $min_confidence/5 confidence" \
     "${DIM}Bypass once with git push --no-verify (or GREPTILE_SKIP_REVIEW=1 git push).${RESET}"
   _pad=$(( (16 - $#) / 2 ))
   [ "$_pad" -lt 0 ] && _pad=0
@@ -128,7 +128,7 @@ else
   {
     printf 'Greptile pre-push hook %s.\n' "$action"
     printf '  %-18s%s\n' "Hook:" "$dest"
-    printf '  %-18s%s\n' "Blocks below:" "$min_confidence/5 confidence"
+    printf '  %-18s%s\n' "Confirms below:" "$min_confidence/5 confidence"
     printf '  Bypass a push: git push --no-verify   (or GREPTILE_SKIP_REVIEW=1 git push)\n'
   } >&2
 fi
