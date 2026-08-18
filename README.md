@@ -1,45 +1,49 @@
-# Greptile skills
+# greptile skills
 
-Skills for reviewing code with Greptile.
+skills and scripts for reviewing code with the greptile cli.
 
-## Skills
+install and sign in to the cli first:
 
-- `review-changes` — Review local changes.
-- `address-pr-feedback` — Address review feedback.
-- `greploop` — Fix changes until Greptile gives them a 5/5 review.
-- `greptile-cli` — Reference for Greptile CLI commands, output, and workflows.
-
-## Install
-
-```bash
-npx skills add greptile-projects/skills
+```sh
+bun add --global greptile
+greptile login
 ```
 
-For Claude Code:
+## skills
 
-```bash
-claude plugin marketplace add greptile-projects/skills
-claude plugin install greptile@greptile
+- `review-changes` reviews committed changes on your local branch.
+- `address-pr-feedback` finds and helps resolve pull request, merge request, and perforce feedback.
+- `greploop` reviews, fixes findings, and repeats until the review is clean.
+- `greptile-cli` explains the cli commands, output, and common workflows.
+
+install all skills with:
+
+```sh
+bunx skills add greptile-projects/skills
 ```
 
-For Codex:
+## scripts
 
-```bash
-codex plugin marketplace add greptile-projects/skills
-codex plugin add greptile@greptile
+add greptile instructions to a repository:
+
+```sh
+sh scripts/add-greptile-context.sh /path/to/repository
 ```
 
-## Pre-push hook
+install the optional pre-push review hook:
 
-A git hook that requires `greptile review` to score 5/5. After a lower score,
-interactive pushes offer a default-deny “push anyway?” confirmation;
-non-interactive pushes remain blocked. Interactive reviews show Greptile's
-native rich report, while non-interactive runs keep output compact.
-
-```bash
-sh hooks/install.sh --repo /path/to/your/repo
+```sh
+sh hooks/install.sh --repo /path/to/repository
 ```
 
-Bypass with `git push --no-verify` or `GREPTILE_SKIP_REVIEW=1 git push`.
-Review execution is capped at 25 minutes by default; set
-`GREPTILE_REVIEW_TIMEOUT_SECONDS` to a positive number of seconds to override it.
+the hook requires a successful greptile review before pushing. a review below the required confidence asks for confirmation in an interactive terminal and blocks the push everywhere else.
+
+bypass it once with `git push --no-verify` or `GREPTILE_SKIP_REVIEW=1 git push`.
+
+reviews time out after 25 minutes by default. set `GREPTILE_REVIEW_TIMEOUT_SECONDS` to a positive number of seconds to change the limit.
+
+run the hook tests with:
+
+```sh
+sh hooks/test-pre-push.sh
+```
