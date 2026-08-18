@@ -11,8 +11,6 @@ greptile login
 
 ## skills
 
-- `review-changes` reviews committed changes on your local branch.
-- `address-pr-feedback` finds and helps resolve pull request, merge request, and perforce feedback.
 - `greploop` reviews, fixes findings, and repeats until the review is clean.
 - `greptile-cli` explains the cli commands, output, and common workflows.
 

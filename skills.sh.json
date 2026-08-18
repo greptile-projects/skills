@@ -6,8 +6,6 @@
       "title": "Greptile",
       "description": "Review code with Greptile.",
       "skills": [
-        "review-changes",
-        "address-pr-feedback",
         "greploop"
       ]
     }
