@@ -22,7 +22,9 @@ After completing a task that changes code (not after every edit):
 
 1. Run `git status --short` and identify only the changes from this task.
    Leave unrelated changes untouched. If a file contains both task changes
-   and pre-existing user changes, stop and ask the user how to proceed.
+   and pre-existing user changes, stop and ask the user how to proceed. If
+   `git diff --cached --quiet` fails, stop and ask the user to commit or
+   unstage their existing staged changes; never alter them yourself.
 2. If you are on main, create a temporary branch (e.g.
    `greptile-review/<task>`). Stage task-owned files by explicit path and
    commit them. Never use `git add .` or `git add -A`.
