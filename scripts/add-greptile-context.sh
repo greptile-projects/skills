@@ -15,16 +15,25 @@ section=$(cat <<'EOF'
 <!-- greptile:begin -->
 ## Greptile
 
-Greptile is an AI code reviewer that reviews changes with full-codebase
-context and returns findings as inline comments with a 1-5 confidence
-score. The `greptile` CLI reviews the local branch before anything is
-pushed; run `greptile review --json` for structured output.
+This repo uses Greptile, an AI code reviewer with full-codebase context.
+The `greptile` CLI reviews the local branch before pushing.
 
-**Workflow:** after each *completed* task (not after every edit), run a
-Greptile review of the changes and return the findings to the user for
-triage. Do not silently fix or dismiss findings — the user decides which
-comments to address. If `greptile` is not installed or not authenticated
-(`greptile whoami`), say so instead of skipping the review quietly.
+After completing a task that changes code (not after every edit):
+
+1. Commit the changes from this task. If you are on main, create a
+   temporary branch (e.g. `greptile-review/<task>`) and commit there
+   instead of main.
+2. Run `greptile review` on the committed changes. Use
+   `greptile review --json` when summarizing findings, so confidence
+   scores and file locations are preserved.
+3. Report every finding and the overall confidence score to the user
+   for triage. Never silently fix or dismiss a finding; the user
+   decides what gets addressed.
+4. If you created a temporary branch, leave it in place and tell the
+   user its name; do not merge it to main yourself.
+
+If `greptile` is not installed or not logged in (`greptile whoami`),
+tell the user rather than skipping the review.
 <!-- greptile:end -->
 EOF
 )
