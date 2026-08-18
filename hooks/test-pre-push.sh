@@ -41,6 +41,10 @@ case ${0##*/} in
           exit 0
           ;;
         review-fails) exit 3 ;;
+        status-hangs)
+          while :; do sleep 1; done
+          ;;
+        resume-hangs) exit 3 ;;
       esac
     fi
     if [ "${1:-}" = review ]; then
@@ -48,6 +52,9 @@ case ${0##*/} in
         in-flight|new-review)
           : >"$MOCK_STATE"
           exit 0
+          ;;
+        resume-hangs)
+          while :; do sleep 1; done
           ;;
       esac
     fi
@@ -127,6 +134,18 @@ if run_hook review-fails "$url" >"$test_dir/output" 2>&1; then
   exit 1
 fi
 grep -q 'review failed' "$test_dir/output"
+
+if GREPTILE_REVIEW_TIMEOUT_SECONDS=1 run_hook status-hangs "$url" >"$test_dir/output" 2>&1; then
+  echo "expected a hanging status check to time out" >&2
+  exit 1
+fi
+grep -q 'review status did not finish within 1 seconds' "$test_dir/output"
+
+if GREPTILE_REVIEW_TIMEOUT_SECONDS=1 run_hook resume-hangs "$url" >"$test_dir/output" 2>&1; then
+  echo "expected a hanging resumed review to time out" >&2
+  exit 1
+fi
+grep -q 'review did not finish within 1 seconds' "$test_dir/output"
 
 if run_hook completed https://example.com/greptile/other.git >"$test_dir/output" 2>&1; then
   echo "expected a different push remote to block the push" >&2
