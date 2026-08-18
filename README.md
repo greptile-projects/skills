@@ -41,5 +41,5 @@ sh hooks/install.sh --repo /path/to/your/repo
 ```
 
 Bypass with `git push --no-verify` or `GREPTILE_SKIP_REVIEW=1 git push`.
-Review execution is capped at five minutes by default; set
+Review execution is capped at 25 minutes by default; set
 `GREPTILE_REVIEW_TIMEOUT_SECONDS` to a positive number of seconds to override it.

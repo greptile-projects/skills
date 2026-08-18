@@ -4,7 +4,7 @@
 # confidence score at or above MIN_CONFIDENCE. Interactive pushes can confirm
 # a one-time override. Bypass explicitly with git push --no-verify.
 MIN_CONFIDENCE=5 # baked by installer
-MAX_REVIEW_SECONDS=300 # runtime override: GREPTILE_REVIEW_TIMEOUT_SECONDS=<seconds>
+MAX_REVIEW_SECONDS=1500 # runtime override: GREPTILE_REVIEW_TIMEOUT_SECONDS=<seconds>
 
 set -u
 
