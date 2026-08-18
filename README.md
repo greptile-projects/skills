@@ -5,7 +5,7 @@ skills and scripts for reviewing code with the greptile cli.
 install and sign in to the cli first:
 
 ```sh
-npm install -g greptile
+bun add --global greptile
 greptile login
 ```
 
@@ -19,7 +19,7 @@ greptile login
 install all skills with:
 
 ```sh
-npx skills add greptile-projects/skills
+bunx skills add greptile-projects/skills
 ```
 
 ## scripts
@@ -38,7 +38,9 @@ sh hooks/install.sh --repo /path/to/repository
 
 the hook requires a successful greptile review before pushing. a review below the required confidence asks for confirmation in an interactive terminal and blocks the push everywhere else.
 
-bypass it once with `git push --no-verify`.
+bypass it once with `git push --no-verify` or `GREPTILE_SKIP_REVIEW=1 git push`.
+
+reviews time out after 25 minutes by default. set `GREPTILE_REVIEW_TIMEOUT_SECONDS` to a positive number of seconds to change the limit.
 
 run the hook tests with:
 
